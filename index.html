@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRM Trichy Bus Tracking System</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:radial-gradient(circle at 20% 0,#14284d,#070d1c 70%) fixed;color:#fff;min-height:100vh}
+button,input,select,textarea{font:inherit;border-radius:10px;border:1px solid #ffffff30;background:#ffffff12;color:#fff;padding:10px 12px}
+select option{color:#000}button{cursor:pointer;transition:.2s}button:hover{background:#ffffff28;transform:translateY(-1px)}
+.p{background:#2f6bff;border-color:#2f6bff}.g{background:#ffffff0f;border:1px solid #ffffff22;border-radius:16px;padding:18px;backdrop-filter:blur(10px)}
+.w{max-width:1200px;margin:auto;padding:16px;animation:in .4s}@keyframes in{from{opacity:0;transform:translateY(10px)}}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.card{cursor:pointer;transition:.25s}.card:hover{transform:translateY(-6px);background:#ffffff1a}
+h1{font-size:clamp(28px,6vw,52px);margin:.2em 0}.mut{opacity:.65;font-size:13px}.err{background:#7f1d1d;border:1px solid #f87171;border-radius:12px;padding:14px;margin:10px 0;white-space:pre-line}
+.ok{background:#14532d}.tag{padding:3px 9px;border-radius:99px;font-size:12px;background:#ffffff1c}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px;border-bottom:1px solid #ffffff18;text-align:left}
+#map{height:68vh;border-radius:16px;min-height:380px}#pop{position:absolute;left:14px;top:14px;z-index:999;width:280px;max-width:80%;animation:sl .35s;color:#fff;background:#0b1530ee}
+@keyframes sl{from{transform:translateX(-30px);opacity:0}}.pu{animation:pu 1s infinite}@keyframes pu{50%{transform:scale(1.5);opacity:.5}}
+.mk{width:30px;height:30px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+.sel{outline:4px solid #fff;outline-offset:2px}
+#toast{position:fixed;right:14px;top:14px;z-index:9999;display:grid;gap:8px;max-width:340px}#toast div{background:#b91c1c;padding:12px;border-radius:12px;animation:sl .3s}
+.hl{border:2px solid #facc15;background:#facc1522;box-shadow:0 0 14px #facc1566}.nw{display:inline-block;background:#facc15;color:#000;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700;margin-right:6px}
+.bd{display:inline-block;background:#f59e0b;color:#000;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
+</style></head><body><div id="toast"></div><div id="app"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const RT="Vayalur → Somarasampettai|Trichy Central → Cantonment|Srirangam → Samayapuram|Manachanallur → Musiri|Thuraiyur → Uppiliapuram|Perambalur → Siruvachur|Ariyalur → Sendurai|Jayankondam|Kallakudi → Lalgudi|Pullambadi → Lalgudi|Thanjavur|Vallam → Thanjavur|Budalur → Thanjavur|Papanasam → Kumbakonam|Kumbakonam → Swamimalai|Pattukkottai|Orathanadu → Pattukkottai|Viralimalai → Pudukkottai|Viralimalai → Pudukkottai|Keeranur → Pudukkottai|Aranthangi|Alangudi → Pudukkottai|Illuppur → Pudukkottai|Manapparai → Thuvarankurichi|Viralimalai → Manapparai|Kulithalai → Karur|Kulithalai → Krishnarayapuram → Karur|Namakkal|Tiruchengode → Namakkal|Nagapattinam → Mayiladuthurai".split("|");
+// DEMO coordinates of each route's far end (approximate straight-line paths, not real road geometry)
+const DC=[[10.93,78.65],[10.82,78.70],[10.93,78.74],[10.95,78.44],[11.15,78.60],[11.23,78.88],[11.20,79.20],[11.21,79.36],[10.87,78.82],[10.89,78.95],[10.79,79.14],[10.75,79.10],[10.80,79.10],[10.95,79.30],[10.96,79.38],[10.43,79.32],[10.35,79.28],[10.38,78.82],[10.38,78.82],[10.45,78.78],[10.17,78.99],[10.28,78.97],[10.34,78.62],[10.52,78.43],[10.52,78.43],[10.95,78.42],[10.93,78.43],[11.22,78.17],[11.38,77.89],[10.77,79.84]];
+const SRM=[10.9435,78.7600],pad=n=>String(n).padStart(2,'0');
+// SIM = simulation speed-up. 1 = real-time (very slow on the map). Lower number = slower buses.
+const SIM=4;
+const R=RT.map((s,i)=>({id:'R'+pad(i+1),name:s+' → SRM',stops:['SRM',...s.split(' → ')],dest:DC[i],buses:['BUS'+pad(2*i+1),'BUS'+pad(2*i+2)]}));
+const FN=['Rajendran','Murugan','Vijay','Suresh','Karthik','Anand','Selvam','Mani','Bala','Ravi'],LN=['Kumar','P','S','M','R','K'],SP={0:'Rajendran Kumar',2:'Murugan P',34:'Vijay Kumar'};
+// DEMO driver data (generated; replace with your real dataset)
+const B=Array.from({length:60},(_,i)=>({id:'BUS'+pad(i+1),r:R[i>>1],name:SP[i]||FN[i%10]+' '+LN[(i/10|0)%6],age:30+i%20,phone:'98765'+(43201+i),pw:'DR'+pad(i+1),spd:28+(i*7)%27,o:i*.137}));
+// each bus drives from its route's far end TO SRM; trip length is based on distance and speed
+B.forEach(b=>{b.dm=L.latLng(SRM).distanceTo(b.r.dest);b.dur=Math.max(180000,b.dm/1000*1.3/b.spd*3600000/SIM)});
+const BM=Object.fromEntries(B.map(b=>[b.id,b]));
+
+// ---- real road paths (OSRM, free, no key). Cached in localStorage after first load ----
+const RP=(()=>{try{return JSON.parse(localStorage.getItem('srmroutes'))||{}}catch(e){return{}}})();
+function mkP(r,c){const cum=[0];for(let i=1;i<c.length;i++)cum.push(cum[i-1]+L.latLng(c[i-1]).distanceTo(c[i]));r.path={c,cum,tot:cum[cum.length-1]};
+B.forEach(b=>{if(b.r==r){b.dm=r.path.tot;b.dur=Math.max(180000,b.dm/1000/b.spd*3600000/SIM)}})}
+// point at fraction p of the way from SRM (0) to the route's far end (1), following the road
+function at(r,p){p=Math.max(0,Math.min(1,p));const d=r.dest;if(!r.path)return[SRM[0]+(d[0]-SRM[0])*p,SRM[1]+(d[1]-SRM[1])*p];
+const{c,cum,tot}=r.path,x=p*tot;let i=1;while(i<c.length-1&&cum[i]<x)i++;const a=c[i-1],b=c[i],f=(x-cum[i-1])/((cum[i]-cum[i-1])||1);return[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f]}
+function slice(r,p0,p1){const pts=[at(r,p0)];if(r.path){const{c,cum,tot}=r.path;for(let i=0;i<c.length;i++)if(cum[i]>p0*tot&&cum[i]<p1*tot)pts.push(c[i])}pts.push(at(r,p1));return pts}
+async function loadRoutes(){for(const r of R){if(RP[r.id]){mkP(r,RP[r.id]);continue}
+try{const d=r.dest,j=await(await fetch(`https://router.project-osrm.org/route/v1/driving/${SRM[1]},${SRM[0]};${d[1]},${d[0]}?overview=full&geometries=geojson`)).json();
+if(j.routes&&j.routes[0]){const c=j.routes[0].geometry.coordinates.map(x=>[+x[1].toFixed(5),+x[0].toFixed(5)]);RP[r.id]=c;mkP(r,c);try{localStorage.setItem('srmroutes',JSON.stringify(RP))}catch(e){}}}catch(e){}
+await new Promise(z=>setTimeout(z,300))}}
+const ST=['ON TIME','DELAYED','BREAKDOWN','EMERGENCY','OFFLINE'],SI={'ON TIME':'🟢','DELAYED':'🟡','BREAKDOWN':'🟠','EMERGENCY':'🔴','OFFLINE':'⚫'},SC={'ON TIME':'#22c55e','DELAYED':'#eab308','BREAKDOWN':'#f97316','EMERGENCY':'#ef4444','OFFLINE':'#6b7280'},CI={LOW:'🟢',MEDIUM:'🟡',HIGH:'🔴'};
+// ---- state ----
+// ---- all data lives on the server (SQLite). S is just a cache refreshed every 2 s ----
+let S={bs:{},al:[],ms:[],ps:{},dr:{},lg:[],st:{}},TOKEN=null,lastH='';
+B.forEach(b=>S.bs[b.id]={crowd:'LOW',status:'ON TIME',fz:null,gps:null,delay:0,o:null});
+async function api(m,u,b){try{const r=await fetch('/api'+u,{method:m,headers:{'Content-Type':'application/json','x-token':TOKEN||''},body:b?JSON.stringify(b):undefined});return await r.json()}catch(e){return null}}
+function applyDr(){B.forEach(b=>{const d=S.dr[b.id],s=S.bs[b.id];if(d){b.name=d.name;b.age=d.age;b.phone=d.phone}if(s&&s.o!=null)b.o=s.o})}
+async function sync(){const q=me&&me.bus?'?bus='+me.bus+(me.num?'&num='+encodeURIComponent(me.num):''):'';const j=await api('GET','/state'+q);if(!j||j.error)return;
+const h=JSON.stringify(j);if(h==lastH)return;lastH=h;const old=new Set(S.al.map(a=>a.id));S=j;applyDr();
+if(v=='admin'&&old.size)S.al.filter(a=>!old.has(a.id)&&!a.res).forEach(toast);draw(true)}
+const save=()=>{};
+function pushBus(id){api('PUT','/bus/'+id,S.bs[id]).then(()=>{lastH='';sync()})}
+const now=()=>new Date().toLocaleTimeString();
+// ---- simulation: position from clock, same in every tab. Bus travels from route end -> SRM Trichy, then restarts. DEMO / SIMULATED ----
+// t = trip progress (0 = at route start, 1 = arrived at SRM); p = fraction of the way still left to SRM
+function pos(b){const s=S.bs[b.id];if(s.gps)return{ll:s.gps,p:Math.min(1,L.latLng(s.gps).distanceTo(SRM)/b.dm),real:true};
+const t=s.fz!=null?s.fz:((Date.now()/b.dur+b.o)%1),p=1-t,d=b.r.dest;return{ll:at(b.r,p),p,t,real:false}}
+function info(b){const s=S.bs[b.id],q=pos(b),stp=b.r.stops,cur=stp[Math.min(stp.length-1,Math.round(q.p*(stp.length-1)))],mv=['ON TIME','DELAYED'].includes(s.status),sp=mv?b.spd:0;
+const base=q.real?L.latLng(q.ll).distanceTo(SRM)/1000*1.3/b.spd*60:q.p*b.dur/60000;
+return{...s,q,cur,sp,eta:mv?Math.max(1,Math.round(base))+(s.delay||0):null,dst:'SRM Trichy',from:stp[stp.length-1]}}
+function addAl(type,bus,txt,extra){S.al.push({id:-Date.now(),type,bus,txt,time:now(),res:false,...extra});api('POST','/alerts',{type,bus,txt}).then(()=>{lastH='';sync()})}
+function setSt(id,st){const s=S.bs[id];s.status=st;if(['BREAKDOWN','EMERGENCY','OFFLINE'].includes(st)&&s.fz==null&&!s.gps)s.fz=pos(BM[id]).t;if(st=='ON TIME'||st=='DELAYED'){if(s.fz!=null){const nb=BM[id];nb.o=((s.fz-Date.now()/nb.dur)%1+1)%1;s.o=nb.o}s.fz=null}pushBus(id)}
+function toast(a){const d=document.createElement('div');d.innerHTML=`<b>${a.type=='EMERGENCY'?'🚨🚨 EMERGENCY':'🚨 '+a.type}</b> ${a.bus}<br>${esc(a.txt)}`;$('#toast').append(d);setTimeout(()=>d.remove(),6000)}
+// ---- views ----
+let v='home',me=null,tab='map',selB=null,map,mks={},cl,rl=[],tm,msg='';
+const go=(x,m)=>{if(x=='home')TOKEN=null;v=x;me=m;msg='';tab='map';draw();lastH='';sync()};
+const hdr=(t,back)=>`<div class="row" style="justify-content:space-between;margin-bottom:12px"><b style="font-size:18px">🚌 ${t}</b><div class="row"><span class="bd">DEMO / SIMULATED DATA</span><button onclick="go('home')">${back||'Exit'}</button></div></div>`;
+const V={
+home:()=>`<div class="w" style="text-align:center"><h1>SRM TRICHY BUS TRACKING</h1><p class="mut" style="font-size:18px">Real-Time Campus Transportation Management</p><div class="grid" style="margin-top:30px;text-align:left">
+${[['student','🎓 STUDENT','Track your assigned bus, check crowd status, view bus information, and communicate with your driver.'],['driverLogin','👨‍✈️ DRIVER','Update crowd status, bus status, location, and report delays or emergencies.'],['adminLogin','👨‍💼 ADMIN','Monitor all 60 buses, 30 routes, drivers, students, alerts, messages, and live locations.']].map(c=>`<div class="g card" onclick="go('${c[0]}')"><h2>${c[1]}</h2><p class="mut">${c[2]}</p><button class="p">Enter Section</button></div>`).join('')}</div>
+<p class="mut" style="margin-top:24px">Demo logins — Student: any name / SRM7K2P9 / R01 / BUS01 · Driver: BUS01 / DR01 · Admin: ADMIN1234 / Admin1234</p></div>`,
+student:()=>`<div class="w" style="max-width:520px">${hdr('Student Access','Back')}<div class="g grid" style="grid-template-columns:1fr">
+<input id="sn" placeholder="Your Name" autocomplete="off">
+<input id="sp" placeholder="Bus Pass Code" autocomplete="off">
+<select id="sr" onchange="fillB()"><option value="">Select Route</option>${R.map(r=>`<option value="${r.id}">${r.id} – ${r.name}</option>`).join('')}</select>
+<select id="sb"><option value="">Select route first</option></select>
+<button class="p" onclick="verify()">Verify Pass</button><div id="em"></div></div></div>`,
+driverLogin:()=>`<div class="w" style="max-width:420px">${hdr('Driver Login','Back')}<div class="g grid" style="grid-template-columns:1fr"><input id="du" placeholder="Username (e.g. BUS01)"><input id="dp" type="password" placeholder="Password (e.g. DR01)"><button class="p" onclick="dLogin()">Login</button>${msg}</div></div>`,
+adminLogin:()=>`<div class="w" style="max-width:420px">${hdr('Admin Login','Back')}<div class="g grid" style="grid-template-columns:1fr"><input id="au" placeholder="Username"><input id="ap" type="password" placeholder="Password"><button class="p" onclick="aLogin()">Login</button>${msg}</div></div>`,
+sdash:()=>{const b=BM[me.bus],i=info(b),mine=S.ms.filter(m=>m.num==me.num);return`<div class="w" style="max-width:700px">${hdr('Student Dashboard')}<div class="g"><h2>${b.id}</h2><div>${b.r.id} – ${esc(b.r.name)}</div><p>Driver: <b>${b.name}</b><br>Driver Phone: ${b.phone}<br>Crowd: ${CI[i.crowd]} ${i.crowd}<br>Status: ${SI[i.status]} ${i.status}<br>ETA to SRM: ${i.eta==null?'—':i.eta+' minutes'}</p>
+${['EMERGENCY','BREAKDOWN'].includes(i.status)?'<div class="err">🚨 Important: this bus reports '+i.status+'</div>':''}
+<div class="row"><button class="p" onclick="track()">📍 TRACK BUS</button><button onclick="$('#mb').focus()">💬 CONTACT DRIVER</button><button onclick="$('#mb').value='Sir, I missed the bus at ____. What should I do?';$('#mb').focus()">❓ I MISSED MY BUS</button></div><div id="tr"></div></div>
+<div class="g" style="margin-top:12px"><textarea id="mb" rows="3" style="width:100%" placeholder="Message to your driver, e.g. Sir, is the bus late today?"></textarea><button class="p" onclick="sendM()">Send to ${b.name} (${b.id})</button>
+${mine.map(m=>`<div class="g hl" style="margin-top:8px"><span class="nw">SENT</span>🧑 <b>${esc(m.name)}</b>: ${esc(m.text)}${m.reply?`<br>💬 <b>Driver reply:</b> ${esc(m.reply)}`:'<br><span class="mut">Waiting for driver…</span>'}</div>`).join('')}</div></div>`},
+ddash:()=>{const b=BM[me.bus],i=info(b),inb=S.ms.filter(m=>m.bus==b.id).reverse();return`<div class="w" style="max-width:760px">${hdr('Driver Dashboard')}<div class="g"><h2>${b.id}<br><small>${b.name}</small></h2><div>Route: ${b.r.id} – ${esc(b.r.name)}</div><p class="mut">Phone ${b.phone} · Location: ${i.cur} · ${i.q.real?'REAL GPS':'DEMO / SIMULATED GPS'}</p></div>
+<div class="g" style="margin-top:12px"><b>CURRENT CROWD</b><div class="row">${['LOW','MEDIUM','HIGH'].map(c=>`<button class="${i.crowd==c?'p':''}" onclick="setCrowd('${c}')">${CI[c]} ${c}</button>`).join('')}</div>
+<p><b>BUS STATUS</b></p><div class="row">${ST.map(s=>`<button class="${i.status==s?'p':''}" onclick="dStatus('${s}')">${SI[s]} ${s}</button>`).join('')}</div>
+<p><b>LIVE LOCATION</b></p><div class="row"><button onclick="useGPS()">📡 Use device GPS</button><button onclick="S.bs['${b.id}'].gps=null;pushBus('${b.id}');draw()">Use demo simulation</button></div></div>
+<div class="g" style="margin-top:12px"><b>REPORT ISSUE</b><div class="row" style="margin:8px 0"><select id="rr">${['Traffic','Bus Breakdown','Accident','Heavy Rain','Road Block','Driver Emergency','Passenger Issue','Other'].map(x=>`<option>${x}</option>`).join('')}</select><input id="rd" type="number" placeholder="Delay (min)" style="width:130px"></div><input id="ra" placeholder="Additional message" style="width:100%;margin-bottom:8px"><div class="row"><button class="p" onclick="report()">Send to Admin</button><button style="background:#b91c1c" onclick="emerg()">🚨 ACCIDENT / EMERGENCY</button></div></div>
+<div class="g" style="margin-top:12px"><b>📩 STUDENT MESSAGES</b>${inb.length?'':'<p class="mut">No messages</p>'}${inb.map(m=>`<div class="g ${m.reply?'':'hl'}" style="margin-top:8px">${m.reply?'':'<span class="nw">NEW</span>'}Student: <b>${esc(m.name)}</b><br>Pass: ${m.num}<br>${esc(m.text)}<br>${m.reply?'↩ '+esc(m.reply):`<button onclick="reply(${m.id})">REPLY</button>`}</div>`).join('')}</div></div>`},
+admin:()=>{const c=k=>B.filter(b=>S.bs[b.id].status==k).length;return`<div class="w" style="max-width:1400px">${hdr('Admin Control Centre')}
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">${[['60','BUSES'],['30','ROUTES'],['60','DRIVERS'],[Object.keys(S.ps).length,'BUS PASSES']].map(x=>`<div class="g"><h2 style="margin:0">${x[0]}</h2>${x[1]}</div>`).join('')}</div>
+<div class="row" style="margin:12px 0">${ST.map(s=>`<span class="tag">${SI[s]} ${s}: ${c(s)}</span>`).join('')}</div>
+<div class="row" style="margin-bottom:10px">${['map','alerts','messages','routes','drivers','students','logins','passes'].map(t=>`<button class="${tab==t?'p':''}" onclick="tab='${t}';draw()">${t.toUpperCase()}${t=='alerts'&&S.al.some(a=>!a.res)?' ('+S.al.filter(a=>!a.res).length+')':''}</button>`).join('')}</div>${A[tab]()}</div>`}};
+const A={map:()=>`<div class="row" style="margin-bottom:8px"><input id="q" placeholder="🔍 Search Bus e.g. BUS35" onkeydown="if(event.key=='Enter')pick($('#q').value.toUpperCase().trim())"><button onclick="pick($('#q').value.toUpperCase().trim())">Search</button><span class="mut">All buses are heading to SRM Trichy</span></div><div style="position:relative"><div id="map"></div><div id="pop" class="g" style="display:none"></div></div>
+<div class="row" style="margin-top:8px"><span class="mut">Demo controls:</span><select id="sim">${B.map(b=>`<option>${b.id}</option>`).join('')}</select><button onclick="sim('DELAYED')">Simulate delay</button><button onclick="sim('EMERGENCY')">Simulate emergency</button><button onclick="sim('ON TIME')">Reset</button></div>`,
+alerts:()=>`<div class="grid" style="grid-template-columns:1fr">${S.al.slice().reverse().map(a=>`<div class="g" style="${a.type=='EMERGENCY'&&!a.res?'border-color:#ef4444':''}">${a.type=='EMERGENCY'?'🚨🚨 EMERGENCY':'🚨 '+a.type} · <b>${a.bus}</b> · ${BM[a.bus]?BM[a.bus].name+' · '+BM[a.bus].r.id:''}<br>${esc(a.txt)}<br><span class="mut">${a.time}${a.res?' · RESOLVED':''}</span><div class="row" style="margin-top:6px"><button onclick="viewBus('${a.bus}')">VIEW BUS</button><button onclick="alert('Call ${BM[a.bus]?BM[a.bus].name+' on '+BM[a.bus].phone:''}')">CONTACT DRIVER</button>${a.res?'':`<button onclick="api('PATCH','/alerts/${a.id}',{res:true}).then(()=>{lastH='';sync()})">MARK RESOLVED</button>`}</div></div>`).join('')||'<p class="mut">No alerts</p>'}</div>`,
+messages:()=>`<div class="grid" style="grid-template-columns:1fr">${S.ms.slice().reverse().map(m=>`<div class="g ${m.reply?'':'hl'}">${m.reply?'':'<span class="nw">NEW</span>'}📩 <b>${esc(m.name)}</b> (${m.num}) → ${m.bus} · ${BM[m.bus].name} · ${m.route}<br>${esc(m.text)}<br><span class="mut">${m.reply?'Replied: '+esc(m.reply):'Waiting for Driver'}</span></div>`).join('')||'<p class="mut">No messages</p>'}</div>`,
+routes:()=>`<div class="g" style="overflow:auto"><table><tr><th>Route<th>Stops<th>Bus<th>Driver<th>Status<th>Crowd</tr>${R.map(r=>r.buses.map((id,k)=>{const s=S.bs[id];return`<tr>${k?'<td>':`<td rowspan=2>${r.id}`}${k?'<td>':`<td rowspan=2>${r.stops.slice().reverse().join(' → ')}`}<td>${id}<td>${BM[id].name}<td>${SI[s.status]} ${s.status}<td>${CI[s.crowd]} ${s.crowd}</tr>`}).join('')).join('')}</table></div>`,
+drivers:()=>`<div class="g" style="overflow:auto"><div class="row" style="margin-bottom:8px"><b>👨‍✈️ DRIVER DATABASE (${B.length})</b><button class="p" onclick="expD()">⬇ DOWNLOAD CSV</button></div><table><tr><th>Driver<th>Age<th>Phone<th>Bus<th>Route<th>Username<th>Password<th>Status<th>Logins<th>Last login<th></tr>${B.map(b=>{const d=S.dr[b.id];return`<tr><td>${esc(b.name)}<td>${b.age}<td>${b.phone}<td>${b.id}<td>${b.r.id}<td>${b.id}<td>********<td>${S.bs[b.id].status=='OFFLINE'?'OFFLINE':'ACTIVE'}<td>${d.count||0}<td>${d.last||'—'}<td><button onclick="editD('${b.id}')">EDIT</button></tr>`}).join('')}</table></div>`,
+students:()=>`<div class="g" style="overflow:auto"><div class="row" style="margin-bottom:8px"><b>🎓 STUDENT DATABASE (${Object.keys(S.st).length})</b><button class="p" onclick="expS()">⬇ DOWNLOAD CSV</button></div><table><tr><th>Name<th>Pass code<th>Bus<th>Route<th>Logins<th>First login<th>Last login</tr>${Object.values(S.st).reverse().map(x=>`<tr><td>${esc(x.name)}<td>${esc(x.code)}<td>${x.bus}<td>${x.route}<td>${x.count}<td>${x.first}<td>${x.last}</tr>`).join('')||'<tr><td colspan=7 class="mut">No students have logged in yet</tr>'}</table></div>`,
+logins:()=>`<div class="g" style="overflow:auto"><div class="row" style="margin-bottom:8px"><b>🕐 LOGIN HISTORY (${S.lg.length})</b><button class="p" onclick="expL()">⬇ DOWNLOAD CSV</button></div><table><tr><th>Time<th>Role<th>Name<th>ID / Pass<th>Bus<th>Route</tr>${S.lg.slice().reverse().map(l=>`<tr><td>${l.time}<td>${l.role=='DRIVER'?'👨‍✈️':'🎓'} ${l.role}<td>${esc(l.name)}<td>${esc(l.id)}<td>${l.bus}<td>${l.route}</tr>`).join('')||'<tr><td colspan=6 class="mut">No logins yet</tr>'}</table></div>`,
+passes:()=>`<div class="g"><div class="row"><input id="ps" placeholder="Search student / number / code" oninput="drawP()"><button class="p" onclick="addS()">ADD STUDENT</button></div><div id="pt" style="overflow:auto;max-height:60vh;margin-top:8px"></div></div>`};
+function pRows(q){q=(q||'').toLowerCase();return`<table><tr><th>Code<th>Student<th>Number<th>Route<th>Bus<th>Active<th></tr>${Object.entries(S.ps).filter(([c,p])=>(c+p.name+p.num).toLowerCase().includes(q)).map(([c,p])=>`<tr><td>${c}<td>${esc(p.name)}<td>${p.num}<td>${BM[p.bus].r.id}<td>${p.bus}<td>${p.active?'✅':'❌'}<td><button onclick="togP('${c}')">${p.active?'DISABLE':'ENABLE'}</button><button onclick="chBus('${c}')">CHANGE BUS</button></tr>`).join('')}</table>`}
+function drawP(){$('#pt').innerHTML=pRows($('#ps')&&$('#ps').value)}
+async function togP(c){await api('PUT','/passes/'+c,{active:!S.ps[c].active});lastH='';await sync();drawP()}
+async function chBus(c){const b=prompt('New bus (e.g. BUS07) — route follows the bus');if(b&&BM[b.toUpperCase()]){await api('PUT','/passes/'+c,{bus:b.toUpperCase()});lastH='';await sync();drawP()}}
+async function addS(){const n=prompt('Student name'),m=prompt('Student number'),b=(prompt('Bus (BUS01–BUS60)')||'').toUpperCase();if(!n||!m||!BM[b])return alert('Invalid input');
+const r=await api('POST','/passes',{name:n,num:m,bus:b});if(!r||!r.code)return alert('Failed to add student');lastH='';await sync();alert('Generated pass: '+r.code);draw()}
+// ---- exports (CSV) ----
+function csv(f,h,rows){const q=x=>'"'+String(x==null?'':x).replace(/"/g,'""')+'"',t=[h,...rows].map(r=>r.map(q).join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download=f;a.click()}
+function expD(){csv('drivers.csv',['Driver','Age','Phone','Bus','Route','Username','Password','Logins','Last login'],B.map(b=>{const d=S.dr[b.id];return[b.name,b.age,b.phone,b.id,b.r.id,b.id,b.pw,d.count||0,d.last||'']}))}
+function expL(){csv('login-history.csv',['Time','Role','Name','ID / Pass code','Bus','Route'],S.lg.map(l=>[l.time,l.role,l.name,l.id,l.bus,l.route]))}
+function expS(){csv('students.csv',['Name','Pass code','Bus','Route','Logins','First login','Last login'],Object.values(S.st).map(x=>[x.name,x.code,x.bus,x.route,x.count,x.first,x.last]))}
+async function editD(id){const d=S.dr[id],n=prompt('Driver name',d.name);if(n===null)return;const a=prompt('Age',d.age),ph=prompt('Phone',d.phone),pw=prompt('New password (leave empty to keep)','');
+await api('PUT','/drivers/'+id,{name:n.trim()||d.name,age:+a||d.age,phone:ph||d.phone,pw:(pw||'').trim().toUpperCase()});lastH='';sync()}
+// ---- actions ----
+// choosing a route lists only that route's buses
+function fillB(){const r=R.find(x=>x.id==$('#sr').value);
+$('#sb').innerHTML=r?'<option value="">Select Bus ('+r.buses.length+' available)</option>'+r.buses.map(id=>`<option value="${id}">${id}</option>`).join(''):'<option value="">Select route first</option>'}
+// student gets in only if the bus pass code is valid (name / number are not checked)
+async function verify(){const n=$('#sn').value.trim(),c=$('#sp').value.trim().toUpperCase(),r=$('#sr').value,b=$('#sb').value;
+const j=await api('POST','/login/student',{name:n,code:c,bus:b,route:r});
+if(!j)return $('#em').innerHTML='<div class="err">⚠️ Cannot reach the server. Is it running?</div>';
+if(!j.ok)return $('#em').innerHTML=`<div class="err">${esc(j.error)}</div>`;
+go('sdash',{code:c,name:n,num:c,bus:b})}
+async function dLogin(){const u=$('#du').value.trim().toUpperCase(),j=await api('POST','/login/driver',{u,p:$('#dp').value.trim().toUpperCase()});if(j&&j.ok)go('ddash',{bus:u});else{msg='<div class="err">'+(j?'Invalid driver credentials':'⚠️ Cannot reach the server')+'</div>';draw()}}
+async function aLogin(){const j=await api('POST','/login/admin',{u:$('#au').value,p:$('#ap').value});if(j&&j.ok){TOKEN=j.token;go('admin',{})}else{msg='<div class="err">'+(j?'Invalid admin credentials':'⚠️ Cannot reach the server')+'</div>';draw()}}
+async function sendM(){const t=$('#mb').value.trim();if(!t)return;await api('POST','/messages',{name:me.name,num:me.num,bus:me.bus,route:BM[me.bus].r.id,text:t});addAl('MESSAGE',me.bus,'Student '+me.name+': '+t);lastH='';await sync();draw()}
+async function reply(id){const r=prompt('Your reply');if(r){await api('PATCH','/messages/'+id,{reply:r});lastH='';await sync();draw()}}
+function setCrowd(c){S.bs[me.bus].crowd=c;if(c=='HIGH')addAl('CROWD',me.bus,'Crowd changed to HIGH');pushBus(me.bus);draw()}
+function dStatus(s){setSt(me.bus,s);if(s!='ON TIME')addAl(s=='DELAYED'?'DELAY':s,me.bus,'Status set to '+s);draw()}
+function report(){const r=$('#rr').value,d=+$('#rd').value||0;S.bs[me.bus].delay=d;addAl(/Breakdown/.test(r)?'BREAKDOWN':'DELAY',me.bus,`Reason: ${r}. Expected delay: ${d} min. ${$('#ra').value}`);setSt(me.bus,/Breakdown/.test(r)?'BREAKDOWN':'DELAYED');draw()}
+function emerg(){if(confirm('🚨 CONFIRM EMERGENCY\n\nThis immediately alerts Admin with your live location. Send?')){setSt(me.bus,'EMERGENCY');addAl('EMERGENCY',me.bus,'Accident / Emergency reported. LIVE LOCATION AVAILABLE');draw()}}
+function useGPS(){if(!navigator.geolocation)return alert('GPS unavailable');navigator.geolocation.watchPosition(p=>{S.bs[me.bus].gps=[p.coords.latitude,p.coords.longitude];S.bs[me.bus].fz=null;pushBus(me.bus)},e=>alert('GPS denied: '+e.message),{enableHighAccuracy:true})}
+function sim(st){const id=$('#sim').value;setSt(id,st);if(st!='ON TIME')addAl(st=='DELAYED'?'DELAY':st,id,'[SIMULATED] '+st);draw();pick(id)}
+function track(){const b=BM[me.bus],i=info(b);$('#tr').innerHTML='<div id="sm2" style="height:260px;margin-top:10px;border-radius:12px"></div>';const m=L.map('sm2').setView(i.q.ll,11);baseLayer().addTo(m);
+L.polyline(slice(b.r,0,1),{color:'#2f6bff',weight:4}).addTo(m);L.circleMarker(SRM,{radius:8,color:'#fff',fillColor:'#ef4444',fillOpacity:1}).addTo(m).bindTooltip('SRM Trichy');L.marker(i.q.ll).addTo(m).bindPopup(b.id+' → SRM Trichy (demo position)').openPopup()}
+// ---- admin map (normal street map view, no API key needed) ----
+function baseLayer(){const e=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'});let sw=false;
+e.on('tileerror',()=>{if(sw||!e._map)return;sw=true;const m=e._map;m.removeLayer(e);L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap contributors'}).addTo(m)});return e}
+function icon(b){const s=S.bs[b.id].status,big=selB==b.id,z=big?56:30;return L.divIcon({className:'',iconSize:[z,z],html:`<div class="mk ${s=='EMERGENCY'?'pu':''} ${big?'sel':''}" style="background:${SC[s]};width:${z}px;height:${z}px;font-size:${big?30:15}px;${big?'border-width:4px;box-shadow:0 0 0 6px #ffffff55,0 0 24px #fff;':''}" title="${b.id}">🚌</div>${big?`<div style="position:absolute;left:50%;top:-24px;transform:translateX(-50%);background:#000c;color:#fff;padding:2px 8px;border-radius:8px;font:700 12px system-ui;white-space:nowrap">${b.id}</div>`:''}`})}
+function syncM(b){const m=mks[b.id],sel=selB==b.id;m.setLatLng(pos(b).ll);m.setIcon(icon(b));
+if(sel&&cl.hasLayer(m)){cl.removeLayer(m);map.addLayer(m)}else if(!sel&&!cl.hasLayer(m)){map.removeLayer(m);cl.addLayer(m)}m.setZIndexOffset(sel?1000:0)}
+function initMap(){if(map){map.remove();map=null}mks={};if(!$('#map'))return;map=L.map('map').setView([10.8,78.9],9);
+baseLayer().addTo(map);
+cl=L.markerClusterGroup?L.markerClusterGroup({maxClusterRadius:40}):L.layerGroup();map.addLayer(cl);
+B.forEach(b=>{const m=L.marker(pos(b).ll,{icon:icon(b)}).on('click',()=>pick(b.id));mks[b.id]=m;cl.addLayer(m)});
+L.circleMarker(SRM,{radius:9,color:'#fff',fillColor:'#ef4444',fillOpacity:1}).addTo(map).bindTooltip('SRM Trichy (all buses arrive here)',{permanent:true,direction:'top'});
+clearInterval(tm);tm=setInterval(tick,2000);if(selB)pick(selB)}
+function tick(){if(v!='admin'||tab!='map'||!map)return clearInterval(tm);B.forEach(syncM);
+if(selB&&rl.length){const b=BM[selB],q=pos(b).ll;const pp=pos(b).p;rl[0].setLatLngs(slice(b.r,pp,1));rl[1].setLatLngs(slice(b.r,0,pp));pop()}}
+function pick(id){const b=BM[id];if(!b)return alert('Bus not found');selB=id;const q=pos(b).ll;if(map){map.flyTo(q,11,{duration:1});}
+rl.forEach(l=>map.removeLayer(l));const pp=pos(b).p;rl=[L.polyline(slice(b.r,pp,1),{color:'#22c55e',weight:5}).addTo(map),L.polyline(slice(b.r,0,pp),{color:'#2f6bff',weight:3,dashArray:'8 8'}).addTo(map)];B.forEach(syncM);pop()}
+function pop(){const b=BM[selB],i=info(b),d=$('#pop');if(!d)return;d.style.display='block';d.innerHTML=`<div class="row" style="justify-content:space-between"><b>🚌 ${b.id}</b><button onclick="selB=null;rl.forEach(l=>map.removeLayer(l));rl=[];this.parentNode.parentNode.style.display='none'">✕</button></div>👨‍✈️ ${b.name} · ${b.phone} · age ${b.age}<br><b>${b.r.id}</b><br>${esc(b.r.name)}<br>🚏 Started from: ${i.from}<br>📍 Current: ${i.cur}<br>🎯 Going to: ${i.dst}<br>🕐 ETA: ${i.eta==null?'—':i.eta+' min'}<br>🚍 Speed: ${i.sp} km/h<br>👥 Crowd: ${CI[i.crowd]} ${i.crowd}<br>Status: ${SI[i.status]} ${i.status}<br><span class="mut">${i.q.real?'REAL GPS':'DEMO / SIMULATED'} · updated ${now()}</span>`}
+function viewBus(id){tab='map';draw();setTimeout(()=>pick(id),300)}
+// ---- render ----
+function draw(soft){if(soft&&v=='admin'&&tab=='map')return;if(soft&&['student','driverLogin','adminLogin','home'].includes(v))return;
+const ae=document.activeElement;if(soft&&ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
+$('#app').innerHTML=V[v]();if(v=='admin'){tab=='map'?initMap():clearInterval(tm);if(tab=='passes')drawP()}else{clearInterval(tm);map=null}}
+loadRoutes();draw();sync();setInterval(sync,2000);
+</script></body></html>
